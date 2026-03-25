@@ -203,13 +203,40 @@ def init_db():
     """
     )
 
-    # (기존 코드) store_discounts 테이블 생성 코드 아래에 추가
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS custom_recipes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             recipe_name TEXT,
             ingredients TEXT,
+            s1_price INTEGER,
+            s2_price INTEGER,
+            s3_price INTEGER,
+            s4_price INTEGER,
+            s5_price INTEGER,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """
+    )
+
+    # 새로 추가된 커스텀 재료 / 작물 테이블
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS custom_ingredients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            price INTEGER,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """
+    )
+
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS custom_crops (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            growth_time_mins INTEGER,
             s1_price INTEGER,
             s2_price INTEGER,
             s3_price INTEGER,

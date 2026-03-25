@@ -14,8 +14,8 @@ from static_data import (
     generic_seafood_prices,
     forage_sell_prices,
     growth_mins,
-    store_alias,  # <-- 추가!
-    sub_recipe_map,  # <-- 추가!
+    store_alias,
+    sub_recipe_map,
 )
 from database import get_connection, init_db
 from utils import get_kst_now, get_kst_date, calculate_wilson_ci
@@ -26,13 +26,10 @@ from utils import get_kst_now, get_kst_date, calculate_wilson_ci
 #    '귤(Mandarin)'의 채집 효율과 완전히 동일하게 취급하여 계산할 것.
 # ==========================================
 
-
 # --- 데이터베이스 초기화 및 연결 ---
 DB_NAME = "duduta_experiment.db"
 
-
 init_db()
-
 
 def get_fishes_for_location(location, weather_selection):
     conn = get_connection()
@@ -96,6 +93,17 @@ def render_gardening():
             st.success(st.session_state["show_success"])
             del st.session_state["show_success"]
 
+        # --- 추가된 부분: 구역 활성화 체크박스 ---
+        st.write(
+            "📍 **사용 중인 밭 구역 선택** (비활성화된 구역은 작물 수 계산 및 지도에서 제외됩니다)"
+        )
+        zone_cols = st.columns(5)
+        for z in range(5):
+            with zone_cols[z]:
+                st.checkbox(f"{z+1} 구역", value=True, key=f"zone_active_{z}")
+        st.write("")
+        # ----------------------------------------
+
         # Initialize map session state FIRST so we can calculate valid options
         for i in range(4):
             for z in range(5):
@@ -137,6 +145,10 @@ def render_gardening():
             unchecked_count = 0
 
             for z in range(5):
+                # --- 추가된 부분: 비활성화된 구역은 계산 패스 ---
+                if not st.session_state.get(f"zone_active_{z}", True):
+                    continue
+                # ----------------------------------------------
                 for r in range(3):
                     for c in range(3):
                         if r == 1 and c == 1:
@@ -158,36 +170,27 @@ def render_gardening():
                         else:
                             unchecked_count += 1
 
-            # Only add to valid list if at least one weed exists for this combination
             if mode == "OR_ALL":
                 if checked_count > 0:
                     valid_options[name] = mode
-                    counts_for_options[name] = (
-                        unchecked_count  # Planted count = empty spaces
-                    )
+                    counts_for_options[name] = unchecked_count
             else:
                 if checked_count > 0:
                     valid_options[name] = mode
-                    counts_for_options[name] = (
-                        checked_count  # Planted count = checked spaces
-                    )
+                    counts_for_options[name] = checked_count
 
-        # Fallback if map is completely blank
         if not valid_options:
             valid_options = {"No weeds (Check the map first)": "NONE"}
             counts_for_options["No weeds (Check the map first)"] = 0
 
-        # --- [추가된 심은 작물 개수 자동 동기화 로직] ---
         target_selector = st.session_state.get("weed_map_selector")
 
-        # 목록이 "No weeds"에서 "All Cumulative" 등으로 바뀔 때 셀렉터 강제 업데이트
         if target_selector not in valid_options:
             target_selector = list(valid_options.keys())[0]
             st.session_state["weed_map_selector"] = target_selector
 
         current_calc_count = counts_for_options[target_selector]
 
-        # 지도 상태가 변했거나, 데이터 저장/초기화 직후인 경우 개수 연동
         if (
             ("last_auto_planted_count" not in st.session_state)
             or (current_calc_count != st.session_state["last_auto_planted_count"])
@@ -195,17 +198,42 @@ def render_gardening():
         ):
             st.session_state["g_planted"] = max(0, current_calc_count)
             st.session_state["last_auto_planted_count"] = current_calc_count
-        # ---------------------------------
 
-        # Callback function for dropdown
         def on_map_viewer_change():
             sel_name = st.session_state["weed_map_selector"]
+
+            # --- [추가된 부분] 뷰어 선택에 맞춰 4-bit 비트맵 체크박스 자동 동기화 ---
+            mode = all_map_options.get(sel_name, "NONE")
+            if mode.startswith("EXACT_"):
+                req_indices = [int(x) for x in mode.split("_")[1:]]
+                st.session_state["g_w1"] = 0 in req_indices
+                st.session_state["g_w2"] = 1 in req_indices
+                st.session_state["g_w3"] = 2 in req_indices
+                st.session_state["g_w4"] = 3 in req_indices
+            elif mode == "OR_ALL":
+                # '전체 누적' 선택 시, 실제로 지도에 1개라도 잡초가 찍혀있는 단계만 찾아 자동 활성화
+                active = [False, False, False, False]
+                for i in range(4):
+                    for z in range(5):
+                        for r in range(3):
+                            for c in range(3):
+                                if st.session_state.get(f"wmap_{i}_{z}_{r}_{c}", False):
+                                    active[i] = True
+                st.session_state["g_w1"] = active[0]
+                st.session_state["g_w2"] = active[1]
+                st.session_state["g_w3"] = active[2]
+                st.session_state["g_w4"] = active[3]
+            elif mode == "NONE":
+                st.session_state["g_w1"] = False
+                st.session_state["g_w2"] = False
+                st.session_state["g_w3"] = False
+                st.session_state["g_w4"] = False
+            # ------------------------------------------------------------------
+
             if sel_name in counts_for_options:
                 calc = max(0, counts_for_options[sel_name])
                 st.session_state["g_planted"] = calc
-                st.session_state["last_auto_planted_count"] = (
-                    calc  # 동기화 추적 변수 업데이트
-                )
+                st.session_state["last_auto_planted_count"] = calc
                 st.session_state["g_s1"] = 0
                 st.session_state["g_s2"] = 0
                 st.session_state["g_s3"] = 0
@@ -228,7 +256,7 @@ def render_gardening():
                     "Carrot",
                     "Strawberry",
                     "Corn",
-                    "Grapes",
+                    "Grape",
                     "Eggplant",
                     "Tea Tree",
                     "Cacao Tree",
@@ -251,7 +279,6 @@ def render_gardening():
             weed_bitmap_val = f"{int(w1)}{int(w2)}{int(w3)}{int(w4)}"
 
             weed_removed = st.checkbox("잡초 제거 여부", key="g_weed_rm")
-            # [추가된 부분] 잡초 제거가 체크(True)되어야만 활성화됨
             weed_removed_after = st.checkbox(
                 "방치 후 제거 여부", key="g_weed_rm_after", disabled=not weed_removed
             )
@@ -261,7 +288,6 @@ def render_gardening():
 
         with col2:
             st.subheader("수확 결과")
-            # 입력창을 비활성화(disabled=True)하여 유저가 임의로 수정할 수 없게 잠금
             planted_count = st.number_input(
                 "심은 작물 개수 (지도 자동 계산)",
                 min_value=0,
@@ -297,6 +323,10 @@ def render_gardening():
                 with w_tabs[i]:
                     st.caption(f"**{i+1}차에 '새롭게' 돋아난 잡초 위치만 체크하세요.**")
                     for z in range(5):
+                        # --- 추가된 부분: 비활성화된 구역은 UI 렌더링 생략 ---
+                        if not st.session_state.get(f"zone_active_{z}", True):
+                            continue
+                        # --------------------------------------------------
                         st.markdown(f"**[{z+1} 구역]**")
                         for r in range(3):
                             cell_cols = st.columns([0.5, 0.5, 0.5, 3])
@@ -333,6 +363,10 @@ def render_gardening():
             st.write("")
 
             for z in range(5):
+                # --- 추가된 부분: 비활성화된 구역은 Viewer에서도 생략 ---
+                if not st.session_state.get(f"zone_active_{z}", True):
+                    continue
+                # ----------------------------------------------------
                 st.markdown(f"**[Zone {z+1}]**")
                 for r in range(3):
                     cell_cols = st.columns([0.5, 0.5, 0.5, 3])
@@ -348,7 +382,6 @@ def render_gardening():
                         if selected_mode == "OR_ALL":
                             is_weed_here = any(current_vals)
                         else:
-                            # Strict comparison: exactly matches the required Trues and Falses
                             is_weed_here = current_vals == target_state
 
                         st.session_state[f"cumul_dummy_{z}_{r}_{c}"] = is_weed_here
@@ -366,11 +399,20 @@ def render_gardening():
             bmap = ""
             for r in range(3):
                 for z in range(5):
+                    # --- 추가된 부분: 구역 활성화 여부 확인 ---
+                    is_zone_active = st.session_state.get(f"zone_active_{z}", True)
+                    # ----------------------------------------
                     for c in range(3):
                         if r == 1 and c == 1:
                             continue
-                        val = st.session_state.get(f"wmap_{i}_{z}_{r}_{c}", False)
+
+                        # --- 수정된 부분: 비활성 구역은 무조건 False 할당 ---
+                        if is_zone_active:
+                            val = st.session_state.get(f"wmap_{i}_{z}_{r}_{c}", False)
+                        else:
+                            val = False
                         bmap += "1" if val else "0"
+                        # -------------------------------------------------
             bitmaps.append(bmap)
         final_weed_bitmap = "|".join(bitmaps)
 
@@ -404,7 +446,6 @@ def render_gardening():
             if submit_button:
                 conn = get_connection()
                 c = conn.cursor()
-                # 잡초 제거가 해제되어 있다면 방치 후 제거도 무조건 False로 강제 보정
                 final_weed_rm_after = weed_removed_after if weed_removed else False
 
                 c.execute(
@@ -419,7 +460,7 @@ def render_gardening():
                         water_stars,
                         weed_bitmap_val,
                         weed_removed,
-                        final_weed_rm_after,  # 새로 추가된 변수
+                        final_weed_rm_after,
                         unattended_time,
                         planted_count,
                         star_1,
@@ -454,12 +495,9 @@ def render_gardening():
             st.info("아직 입력된 데이터가 없습니다.")
         else:
             st.sidebar.header("🌱 원예 조건 필터링")
-
-            # [수정] 비료 미사용(X)이 기본값이 되도록 index=2 설정
             f_fert = st.sidebar.selectbox(
                 "비료 유무", ["전체", "사용(O)", "미사용(X)"], index=2
             )
-
             f_crop = st.sidebar.selectbox(
                 "작물 종류", ["전체"] + list(df["crop_type"].unique())
             )
@@ -469,13 +507,9 @@ def render_gardening():
             f_weed_map = st.sidebar.selectbox(
                 "잡초 생성 비트맵 (4-bit)", ["전체"] + list(df["weed_bitmap"].unique())
             )
-
-            # [수정] 잡초 방치함(X)이 기본값이 되도록 index=2 설정
             f_weed_rm = st.sidebar.selectbox(
                 "잡초 제거", ["전체", "제거함(O)", "방치함(X)"], index=2
             )
-
-            # [추가] 방치 후 제거 여부 필터 UI
             f_weed_rm_after = st.sidebar.selectbox(
                 "방치 후 제거 여부", ["전체", "방치함(O)", "방치 안 함(X)"]
             )
@@ -500,17 +534,13 @@ def render_gardening():
             if f_crop != "전체":
                 filtered_df = filtered_df[filtered_df["crop_type"] == f_crop]
             filtered_df = filtered_df[filtered_df["water_stars"].isin(f_water)]
-
             if f_weed_map != "전체":
                 filtered_df = filtered_df[filtered_df["weed_bitmap"] == f_weed_map]
-
             if f_weed_rm != "전체":
                 filtered_df = filtered_df[
                     filtered_df["weed_removed"]
                     == (1 if f_weed_rm == "제거함(O)" else 0)
                 ]
-
-            # [추가] 방치 후 제거 여부 데이터 필터링 적용
             if f_weed_rm_after != "전체":
                 if "weed_removed_after" in filtered_df.columns:
                     filtered_df = filtered_df[
@@ -917,9 +947,7 @@ def render_apple():
                 st.number_input(
                     "🫐 블루베리 획득 개수", min_value=0, step=1, key="f_blue"
                 )
-            submit_button = st.form_submit_button(
-                label="채집 데이터 저장", on_click=save_foraging_data
-            )
+            st.form_submit_button(label="채집 데이터 저장", on_click=save_foraging_data)
 
     with tab2:
         st.header("무지개 버프 효율 분석")
@@ -1037,7 +1065,7 @@ def render_raspberry():
         st.session_state["r_sec"] = 0
         st.session_state["r_count"] = 0
         st.session_state["r_success"] = (
-            "라즈베리 채집 데이터가 성공적으로 저장되었습니다! (버프 상태는 유지됩니다)"
+            "라즈베리 채집 데이터가 성공 저장되었습니다! (버프 상태는 유지됩니다)"
         )
 
     with tab1:
@@ -1239,7 +1267,6 @@ def render_fishing():
     ]
     weather_options = ["맑음 (Clear)", "비 (Rain)", "무지개 (Rainbow)"]
 
-    # --- 실시간 시간대 자동 계산 함수 (KST 기준) ---
     def get_auto_time_index():
         now = datetime.utcnow() + timedelta(hours=9)
         h = now.hour
@@ -1257,9 +1284,8 @@ def render_fishing():
             return 5
         elif h == 1:
             return 6
-        return 2  # 기본값
+        return 2
 
-    # --- 하토피아 허브 날씨 표(이미지) 파싱 함수 (10분 캐시) ---
     @st.cache_data(ttl=600)
     def fetch_current_weather_index():
         try:
@@ -1276,65 +1302,48 @@ def render_fishing():
             )
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
-
-                # 1. KST 기준 요일 계산 및 6시간 단위 시간대 블록 계산
                 now_kst = datetime.utcnow() + timedelta(hours=9)
-                day_abbrev = now_kst.strftime("%a")  # 예: Mon, Tue, Wed
-                # 0: Dawn(00h), 1: Morning(06h), 2: Day(12h), 3: Night(18h)
+                day_abbrev = now_kst.strftime("%a")
                 col_idx = now_kst.hour // 6
 
-                # 2. Weather forecast 표에서 현재 요일과 일치하는 텍스트 찾기
                 day_elems = soup.find_all(string=re.compile(f"^{day_abbrev}$", re.I))
                 for day_elem in day_elems:
-                    # 해당 텍스트가 속한 행(tr)이나 컨테이너(div)로 거슬러 올라감
                     row = day_elem.find_parent("tr") or day_elem.find_parent(
                         "div", class_=re.compile("row|flex|grid", re.I)
                     )
                     if not row:
                         row = day_elem.find_parent("div").find_parent("div")
-
                     if row:
-                        # 해당 행에 있는 모든 이미지를 가져옴
                         imgs = row.find_all("img")
-
-                        # 표 구조상 요일 아이콘 등이 섞여 있을 수 있으니 뒷부분 4개를 날씨 이미지로 간주
                         if len(imgs) >= 4:
                             target_img = imgs[-4:][col_idx]
-                            # 이미지의 src나 alt 속성을 읽어 날씨 키워드 판별
                             img_data = (
                                 target_img.get("src", "") + target_img.get("alt", "")
                             ).lower()
-
                             if "rainbow" in img_data or "무지개" in img_data:
-                                return 2  # 무지개
+                                return 2
                             elif "rain" in img_data or "비" in img_data:
-                                return 1  # 비
+                                return 1
                             else:
-                                return 0  # 맑음
+                                return 0
         except Exception:
-            pass  # 사이트 구조 변경 등 에러 시 기본값(맑음) 반환
+            pass
         return 0
 
     with tab1:
         st.info(
             "💡 **시스템 자동화 적용됨:** Heartopia-Hub 예보 표의 이미지를 분석하여 '시간대'와 '날씨'가 현재 KST 시간에 맞게 자동으로 세팅됩니다."
         )
-
-        # 현재 시간 및 파싱된 날씨 인덱스 받아오기
         auto_time_idx = get_auto_time_index()
         auto_weather_idx = fetch_current_weather_index()
 
         col1, col2 = st.columns([1, 1.5])
         with col1:
             f_location = st.selectbox("📍 낚시터 선택", locations)
-            # 파싱된 날씨 인덱스를 기본값으로 지정
             f_weather = st.selectbox("☁️ 날씨", weather_options, index=auto_weather_idx)
             f_time = st.selectbox("⏳ 시간대", time_periods, index=auto_time_idx)
-
-            # 선택된 날씨가 무지개일 경우 버프 체크박스 자동 활성화
             auto_buff = True if f_weather == "무지개 (Rainbow)" else False
             f_buff = st.checkbox("🌈 무지개 버프 적용", value=auto_buff)
-
             tc1, tc2 = st.columns(2)
             with tc1:
                 f_min = st.number_input("분", min_value=0, step=1, key="fish_min")
@@ -1480,20 +1489,14 @@ def render_shop():
         conn.close()
 
         record_date = st.date_input("기록 날짜", get_kst_date())
-
-        # UI 및 DB 저장에 공통으로 사용할 필터링된 리스트 생성
         filtered_ingredients = [i for i in ingredients_list if "Sugar" not in i]
-
         discounted_items = st.multiselect(
-            "오늘 40% 할인 중인 품목 선택:",
-            options=filtered_ingredients,
+            "오늘 40% 할인 중인 품목 선택:", options=filtered_ingredients
         )
 
         if st.button("할인 정보 저장", type="primary"):
             conn = get_connection()
             c = conn.cursor()
-
-            # 전체 리스트(ingredients_list)가 아닌, 사탕이 제외된 리스트(filtered_ingredients)만 돌면서 저장
             for ing in filtered_ingredients:
                 c.execute(
                     "INSERT INTO store_discounts (record_date, ingredient_name, is_discounted, timestamp) VALUES (?, ?, ?, ?) ON CONFLICT(record_date, ingredient_name) DO UPDATE SET is_discounted = excluded.is_discounted, timestamp = excluded.timestamp",
@@ -1514,8 +1517,6 @@ def render_shop():
             df_analysis["할인 확률(%)"] = (
                 df_analysis["discount_days"] / df_analysis["total_days"]
             ) * 100
-
-            # (기본가 * 일반 확률) + (할인가 * 할인 확률)
             df_analysis["평균 구매 단가"] = (
                 df_analysis["base_price"]
                 * (1 - df_analysis["discount_days"] / df_analysis["total_days"])
@@ -1564,7 +1565,6 @@ def render_efficiency():
         "💡 모든 레시피의 요리 효율(비용, 채집 시간, 밭 점유 시간, 순이익)을 한눈에 확인할 수 있습니다.\n\n※ 농작물이 포함된 레시피는 사용된 작물의 성급(1~5성)에 따라 `_1` ~ `_5` 버전으로 나뉘어 표시됩니다."
     )
 
-    # --- [수정된 안내 문구] ---
     st.markdown(
         """
         **🌱 밭 점유 시간 계산 방식 안내**
@@ -1573,22 +1573,10 @@ def render_efficiency():
         * **평균 드랍률 통제 변인:** 물 5개, 잡초 방치(제거X), 방치 시간 0분
           * **비료 사용(O):** 딸기, 옥수수, 포도, 가지
           * **비료 미사용(X):** 토마토, 감자, 밀, 상추, 파인애플, 당근
-        > *예시: 1성 토마토의 드랍률이 1.5개일 경우, 40칸 밭 1회 수확 시 60개를 얻습니다. 요리에 20개가 필요하다면 0.33번의 수확 사이클이 필요하며, 토마토 성장 시간(15분)을 곱해 총 5분의 밭 점유 시간이 산출됩니다.*
         """
     )
-    # ----------------------------------
 
     df_recipes = pd.DataFrame(recipe_raw_data)
-
-    recipe_prices = {}
-    for _, r in df_recipes.iterrows():
-        recipe_prices[r["name"]] = {
-            "1성": r["s1"],
-            "2성": r["s2"],
-            "3성": r["s3"],
-            "4성": r["s4"],
-            "5성": r["s5"],
-        }
 
     conn = get_connection()
     df_store = pd.read_sql_query(
@@ -1608,11 +1596,55 @@ def render_efficiency():
     df_forage = pd.read_sql_query("SELECT * FROM foraging_experiments", conn)
     df_rasp = pd.read_sql_query("SELECT * FROM raspberry_experiments", conn)
     df_mush = pd.read_sql_query("SELECT * FROM mushroom_experiments", conn)
-    df_yield = pd.read_sql_query(
-        "SELECT * FROM experiments",
-        conn,
-    )
+    df_yield = pd.read_sql_query("SELECT * FROM experiments", conn)
+
+    # 💥 복구된 부분: 커스텀 재료, 작물 데이터 로드 💥
+    df_custom = pd.read_sql_query("SELECT * FROM custom_recipes ORDER BY id DESC", conn)
+    df_custom_ings = pd.read_sql_query("SELECT * FROM custom_ingredients", conn)
+    df_custom_crops = pd.read_sql_query("SELECT * FROM custom_crops", conn)
     conn.close()
+
+    # 💥 복구된 부분: 커스텀 데이터가 포함된 통합 딕셔너리 구성 💥
+    all_recipes_dict = {}
+    recipe_prices = {}
+
+    for _, r in df_recipes.iterrows():
+        all_recipes_dict[r["name"]] = r["recipe"]
+        raw_p = [r["s1"], r["s2"], r["s3"], r["s4"], r["s5"]]
+        valid_p = {
+            i: p
+            for i, p in enumerate(raw_p)
+            if p is not None and not pd.isna(p) and p > 0
+        }
+        p_dict = {"1성": 0, "2성": 0, "3성": 0, "4성": 0, "5성": 0}
+        if valid_p:
+            multipliers = [1, 1.5, 2, 4, 8]
+            first_valid_idx = list(valid_p.keys())[0]
+            base_price = valid_p[first_valid_idx] / multipliers[first_valid_idx]
+            p_dict = {f"{i+1}성": int(base_price * multipliers[i]) for i in range(5)}
+        recipe_prices[r["name"]] = p_dict
+
+    for _, r in df_custom.iterrows():
+        all_recipes_dict[r["recipe_name"]] = r["ingredients"]
+        raw_c = [
+            r["s1_price"],
+            r["s2_price"],
+            r["s3_price"],
+            r["s4_price"],
+            r["s5_price"],
+        ]
+        valid_c = {
+            i: p
+            for i, p in enumerate(raw_c)
+            if p is not None and not pd.isna(p) and p > 0
+        }
+        c_dict = {"1성": 0, "2성": 0, "3성": 0, "4성": 0, "5성": 0}
+        if valid_c:
+            multipliers = [1, 1.5, 2, 4, 8]
+            first_valid_idx = list(valid_c.keys())[0]
+            base_price = valid_c[first_valid_idx] / multipliers[first_valid_idx]
+            c_dict = {f"{i+1}성": int(base_price * multipliers[i]) for i in range(5)}
+        recipe_prices[r["recipe_name"]] = c_dict
 
     with st.expander(
         "📚 현재 등록된 전체 요리 레시피 목록 보기 (클릭하여 열기)", expanded=False
@@ -1626,6 +1658,7 @@ def render_efficiency():
         )
     st.divider()
 
+    # --- 재료 원가 통합 ---
     item_costs = {}
     for _, row in df_store.iterrows():
         if row["total_days"] > 0:
@@ -1651,6 +1684,11 @@ def render_efficiency():
                 150 if sugar not in ["Orange Sugar", "Green Sugar"] else 200
             )
 
+    # 💥 복구된 부분: 커스텀 재료 (Romaine Lettuce 등) 단가 병합 💥
+    for _, row in df_custom_ings.iterrows():
+        item_costs[row["name"]] = row["price"]
+
+    # --- 작물 판매가/성장시간 통합 ---
     crop_sell_prices = {}
     for _, row in df_crop.iterrows():
         crop_sell_prices[row["crop_name"]] = {
@@ -1661,13 +1699,24 @@ def render_efficiency():
             "5성": row["star_5_price"] or 0,
         }
 
+    # 💥 복구된 부분: 커스텀 작물 데이터 병합 💥
+    local_growth_mins = {**growth_mins}
+    for _, row in df_custom_crops.iterrows():
+        crop_sell_prices[row["name"]] = {
+            "1성": row["s1_price"],
+            "2성": row["s2_price"],
+            "3성": row["s3_price"],
+            "4성": row["s4_price"],
+            "5성": row["s5_price"],
+        }
+        local_growth_mins[row["name"]] = row["growth_time_mins"]
+
     col_t1, col_t2 = st.columns([1, 2])
     with col_t1:
         use_rainbow = st.toggle("🌈 채집 무지개 버프 데이터 적용", value=False)
-
     buff_val = 1 if use_rainbow else 0
-    forage_speeds = {}
 
+    forage_speeds = {}
     ab_group = df_forage[df_forage["rainbow_buff"] == buff_val]
     if not ab_group.empty and ab_group["duration_minutes"].sum() > 0:
         mins = ab_group["duration_minutes"].sum()
@@ -1690,22 +1739,7 @@ def render_efficiency():
     m_group = df_mush[df_mush["rainbow_buff"] == buff_val]
     for mtype in ["Button", "Oyster", "Penny Bun", "Shiitake", "Truffle"]:
         sub = m_group[m_group["mushroom_type"] == mtype]
-        mapped_name = {"Penny Bun": "PennyBun", "Truffle": "BlackTruffle"}.get(
-            mtype, mtype
-        )
-        if not sub.empty and sub["duration_minutes"].sum() > 0:
-            forage_speeds[mapped_name] = (
-                sub["gathered_count"].sum() / sub["duration_minutes"].sum()
-            )
-        else:
-            forage_speeds[mapped_name] = 0
-
-    m_group = df_mush[df_mush["rainbow_buff"] == buff_val]
-    for mtype in ["Button", "Oyster", "Penny Bun", "Shiitake", "Truffle"]:
-        sub = m_group[m_group["mushroom_type"] == mtype]
-        mapped_name = {"Penny Bun": "PennyBun", "Truffle": "BlackTruffle"}.get(
-            mtype, mtype
-        )
+        mapped_name = {"Truffle": "BlackTruffle"}.get(mtype, mtype)
         if not sub.empty and sub["duration_minutes"].sum() > 0:
             forage_speeds[mapped_name] = (
                 sub["gathered_count"].sum() / sub["duration_minutes"].sum()
@@ -1736,30 +1770,30 @@ def render_efficiency():
             }
 
     yield_rates = {}
-    fertilizer_crops = ["Strawberry", "Corn", "Grapes", "Eggplant"]
-
-    # [수정된 부분] 요구하신 고정 통제 변인 설정 (물 5개, 잡초 제거X, 방치 0분)
+    fertilizer_crops = ["Strawberry", "Corn", "Grape", "Eggplant"]
     base_condition = (
         (df_yield["water_stars"] == 5)
         & (df_yield["weed_removed"] == 0)
         & (df_yield["unattended_time"] == 0)
     )
 
-    for crop in df_yield["crop_type"].unique():
-        # 기본 통제 변인에 작물별 비료 사용 여부를 추가로 묶어서 필터링
-        if crop in fertilizer_crops:
-            sub_df = df_yield[
-                (df_yield["crop_type"] == crop)
-                & (df_yield["fertilizer"] == 1)
-                & base_condition
-            ]
-        else:
-            sub_df = df_yield[
-                (df_yield["crop_type"] == crop)
-                & (df_yield["fertilizer"] == 0)
-                & base_condition
-            ]
+    # 밭 수확률 Fallback (커스텀 작물 포함)
+    for c_name in local_growth_mins.keys():
+        yield_rates[c_name] = {
+            "1성": 1.5,
+            "2성": 0.0,
+            "3성": 0.0,
+            "4성": 0.0,
+            "5성": 0.0,
+        }
 
+    for crop in df_yield["crop_type"].unique():
+        is_fert = 1 if crop in fertilizer_crops else 0
+        sub_df = df_yield[
+            (df_yield["crop_type"] == crop)
+            & (df_yield["fertilizer"] == is_fert)
+            & base_condition
+        ]
         total_planted = sub_df["planted_count"].sum()
         if total_planted > 0:
             yield_rates[crop] = {
@@ -1770,7 +1804,6 @@ def render_efficiency():
                 "5성": sub_df["star_5"].sum() / total_planted,
             }
 
-    # --- [핵심 로직] 작물이나 해산물이 하위 재료에 하나라도 있는지 재귀적으로 확인 ---
     def check_star_dependency(b_name, visited=None):
         if visited is None:
             visited = set()
@@ -1778,10 +1811,9 @@ def render_efficiency():
             return False
         visited.add(b_name)
 
-        row = df_recipes[df_recipes["name"] == b_name]
-        if row.empty:
+        if b_name not in all_recipes_dict:
             return False
-        r_str = row.iloc[0]["recipe"]
+        r_str = all_recipes_dict[b_name]
 
         for item in r_str.split(","):
             item = item.strip()
@@ -1792,16 +1824,11 @@ def render_efficiency():
                 ing = parts[1]
                 if ing == "Coffee" and b_name == "Coffee":
                     ing = "Coffee Beans"
-
-                # 재료 자체가 작물이나 해산물이면 즉시 1~5성 쪼개기 트리거 발동
-                if ing in growth_mins or ing in generic_seafood_prices:
+                if ing in local_growth_mins or ing in generic_seafood_prices:
                     return True
-
-                # 만약 재료가 완성된 하위 요리라면 재귀 확인
                 m_ing = sub_recipe_map.get(ing, ing)
-                if m_ing in df_recipes["name"].values:
-                    if check_star_dependency(m_ing, visited):
-                        return True
+                if m_ing in all_recipes_dict:
+                    return True
         return False
 
     def format_real_time(mins):
@@ -1811,19 +1838,8 @@ def render_efficiency():
         m, s = total_seconds // 60, total_seconds % 60
         return f"{m}분 {s}초" if m > 0 else f"{s}초"
 
-    table_data = []
-
-    for _, r in df_recipes.iterrows():
-        base_name = r["name"]
-        ingredients_str = r["recipe"]
-        prices = {
-            "s1": r["s1"],
-            "s2": r["s2"],
-            "s3": r["s3"],
-            "s4": r["s4"],
-            "s5": r["s5"],
-        }
-
+    # 단일화된 요리 효율 계산 로직
+    def calculate_recipe_row(base_name, ingredients_str, prices_dict):
         reqs = {}
         for item in ingredients_str.split(","):
             item = item.strip()
@@ -1831,20 +1847,17 @@ def render_efficiency():
                 continue
             parts = item.split(" ", 1)
             if len(parts) == 2 and parts[0].isdigit():
-                qty = int(parts[0])
                 name = parts[1]
-
-                # CookingOil 띄어쓰기 예외만 남김 (커피콩 관련 땜질 코드 삭제)
                 if name == "CookingOil":
                     name = "Cooking Oil"
-
-                reqs[name] = qty
+                reqs[name] = int(parts[0])
 
         has_crop_or_seafood = check_star_dependency(base_name)
         tiers_to_generate = (
             ["1성", "2성", "3성", "4성"] if has_crop_or_seafood else ["기본"]
         )
 
+        rows = []
         for t_idx in tiers_to_generate:
             display_name = base_name if t_idx == "기본" else f"{base_name}_{t_idx[0]}"
             prob_tier = "1/2성" if t_idx in ["기본", "1성", "2성"] else t_idx
@@ -1856,7 +1869,6 @@ def render_efficiency():
 
             for ing_name, qty in reqs.items():
                 target_tier_for_price = "1성" if t_idx == "기본" else t_idx
-                # reqs[name]에서 이미 보정되었으므로 바로 사용 가능합니다.
                 actual_store_name = store_alias.get(ing_name, ing_name)
                 mapped_recipe_name = sub_recipe_map.get(ing_name, ing_name)
 
@@ -1873,25 +1885,23 @@ def render_efficiency():
                 elif ing_name in forage_sell_prices:
                     total_material_cost += qty * forage_sell_prices[ing_name]
                 elif mapped_recipe_name in recipe_prices:
-                    price = recipe_prices[mapped_recipe_name].get(target_tier_for_price)
-                    if price is None:
-                        price = recipe_prices[mapped_recipe_name].get("1성", 0)
-                    total_material_cost += qty * price
+                    p = recipe_prices[mapped_recipe_name].get(target_tier_for_price, 0)
+                    if p == 0:
+                        p = recipe_prices[mapped_recipe_name].get("1성", 0)
+                    total_material_cost += qty * p
 
                 if ing_name in forage_speeds:
                     if forage_speeds[ing_name] > 0:
                         total_forage_mins += qty / forage_speeds[ing_name]
                     else:
-                        total_forage_mins = float(
-                            "inf"
-                        )  # 데이터가 0이면 무한대 처리하여 '데이터 부족'을 띄움
+                        total_forage_mins = float("inf")
 
-                if ing_name in growth_mins:
+                if ing_name in local_growth_mins:
                     if ing_name in yield_rates:
                         rate = yield_rates[ing_name].get(target_tier_for_price, 0)
                         if rate > 0:
                             harvests = qty / (rate * 40)
-                            total_field_mins += harvests * growth_mins[ing_name]
+                            total_field_mins += harvests * local_growth_mins[ing_name]
                         else:
                             can_calc_field = False
                     else:
@@ -1901,22 +1911,36 @@ def render_efficiency():
                 probs = cook_probs[prob_tier]
                 expected_revenue = sum(
                     [
-                        probs[s] * prices[s]
-                        for s in ["s1", "s2", "s3", "s4", "s5"]
-                        if prices[s] is not None
+                        probs[s] * prices_dict[kor]
+                        for s, kor in zip(
+                            ["s1", "s2", "s3", "s4", "s5"],
+                            ["1성", "2성", "3성", "4성", "5성"],
+                        )
+                        if prices_dict[kor] > 0
                     ]
                 )
-                net_profit = expected_revenue - total_material_cost
             else:
-                expected_revenue = None
-                net_profit = None
+                tier_to_kor = {
+                    "1성": "1성",
+                    "2성": "2성",
+                    "3성": "3성",
+                    "4성": "4성",
+                    "5성": "5성",
+                    "기본": "1성",
+                    "1/2성": "1성",
+                }
+                expected_revenue = prices_dict[tier_to_kor.get(t_idx, "1성")]
+
+            net_profit = (
+                expected_revenue - total_material_cost if expected_revenue else None
+            )
 
             field_time_str = (
                 format_real_time(total_field_mins)
-                if can_calc_field and any(ing in growth_mins for ing in reqs)
+                if can_calc_field and any(ing in local_growth_mins for ing in reqs)
                 else (
                     "해당 없음"
-                    if not any(ing in growth_mins for ing in reqs)
+                    if not any(ing in local_growth_mins for ing in reqs)
                     else "데이터 부족"
                 )
             )
@@ -1926,8 +1950,7 @@ def render_efficiency():
                 else "해당 없음"
             )
 
-            # [수정된 부분] 보정된 reqs의 키값을 리스트로 그대로 저장
-            table_data.append(
+            rows.append(
                 {
                     "요리 이름": display_name,
                     "재료 원가": total_material_cost,
@@ -1936,42 +1959,69 @@ def render_efficiency():
                     "채집 시간": forage_time_str,
                     "밭 점유": field_time_str,
                     "필요 식재료": ingredients_str,
-                    "_ing_keys": list(reqs.keys()),
+                    "_ing_keys": list(
+                        reqs.items()
+                    ),  # Changed to items for accurate filtering
                 }
             )
+        return rows
+
+    table_data = []
+    for _, r in df_recipes.iterrows():
+        table_data.extend(
+            calculate_recipe_row(r["name"], r["recipe"], recipe_prices[r["name"]])
+        )
 
     df_final = pd.DataFrame(table_data)
 
     def format_currency(x):
         return "데이터 부족" if pd.isna(x) else f"{x:,.1f} G"
 
-    # ==========================================
-    # [UI 수정] 정규 레시피와 커스텀(시즌) 레시피를 탭으로 분리하여 DB 연동
-    # ==========================================
+    global_max_profit = df_final["순이익"].max() if not df_final.empty else 0
+    if pd.isna(global_max_profit):
+        global_max_profit = 0
+
+    def apply_profit_style(styler):
+        s = styler.background_gradient(
+            subset=["순이익"], cmap="Greens", vmin=0, vmax=global_max_profit
+        )
+
+        def color_negative(val):
+            return (
+                "background-color: white; color: inherit;"
+                if isinstance(val, (int, float)) and val < 0
+                else ""
+            )
+
+        if hasattr(s, "map"):
+            return s.map(color_negative, subset=["순이익"])
+        else:
+            return s.applymap(color_negative, subset=["순이익"])
+
     tab_main, tab_add, tab_view, tab_manage = st.tabs(
         [
             "📊 정규 요리 효율 대시보드",
             "➕ 커스텀/시즌 요리 추가",
             "📝 커스텀 요리 효율표",
-            "🗑️ 커스텀 요리 관리",
+            "🗑️ 커스텀 데이터 관리",
         ]
     )
 
     with tab_main:
         st.subheader("📊 요리 종합 기회비용 및 효율 분석표")
-
         store_filter_options = [
             item for item in item_costs.keys() if "Sugar" not in item
         ]
         selected_filter_ings = st.multiselect(
             "🛒 상점 재료 필터 (마시모 상점 판매 물품 한정)",
             options=sorted(store_filter_options),
-            placeholder="필터링할 상점 재료를 선택하세요 (예: Butter, Cooking Oil, Coffee Beans 등)",
+            placeholder="필터링할 상점/커스텀 재료를 선택하세요",
         )
 
         if selected_filter_ings:
+            # _ing_keys is now a list of tuples (name, qty)
             mask = df_final["_ing_keys"].apply(
-                lambda keys: any(item in keys for item in selected_filter_ings)
+                lambda keys: any(item[0] in selected_filter_ings for item in keys)
             )
             df_final = df_final[mask]
 
@@ -1982,74 +2032,148 @@ def render_efficiency():
             "※ 작물 및 채집물은 상점 씨앗 가격이 아닌 **판매 가격(기회비용)**을 원가로 반영하여 순이익을 계산했습니다."
         )
         st.dataframe(
-            df_final.style.format(
-                {
-                    "재료 원가": format_currency,
-                    "평균 판매가": format_currency,
-                    "순이익": format_currency,
-                }
-            ).background_gradient(subset=["순이익"], cmap="Greens"),
+            apply_profit_style(
+                df_final.style.format(
+                    {
+                        "재료 원가": format_currency,
+                        "평균 판매가": format_currency,
+                        "순이익": format_currency,
+                    }
+                )
+            ),
             use_container_width=True,
             hide_index=True,
             height=800,
         )
 
+    # 💥 복구된 부분: 커스텀 레시피/재료/작물 추가 UI 💥
     with tab_add:
-        st.subheader("⏳ 커스텀 (시즌 한정) 레시피 추가")
+        st.subheader("⏳ 커스텀 (시즌 한정) 데이터 추가")
         st.info(
-            "입력하신 레시피는 DB에 저장되며, '커스텀 요리 효율표' 탭에서 언제든 효율을 확인할 수 있습니다."
+            "입력하신 데이터는 즉시 요리 효율 계산에 반영됩니다. 영문명을 권장합니다."
         )
 
-        with st.form("custom_recipe_form", clear_on_submit=True):
-            col_c1, col_c2 = st.columns([1, 2])
-            with col_c1:
-                c_name = st.text_input("요리 이름", placeholder="예: 벚꽃 롤케이크")
-            with col_c2:
-                c_recipe = st.text_input(
-                    "필요 식재료 (쉼표로 구분)",
-                    placeholder="예: 2 Strawberry, 1 Milk, 1 Wheat",
-                )
+        add_mode = st.radio(
+            "추가할 데이터 유형 선택",
+            [
+                "새로운 커스텀 요리 레시피",
+                "새로운 커스텀 재료 (상점 등)",
+                "새로운 커스텀 작물",
+            ],
+            horizontal=True,
+        )
 
-            st.write("💰 성급별 판매가 입력 (해당 없는 성급은 0으로 두세요)")
-            s_col1, s_col2, s_col3, s_col4, s_col5 = st.columns(5)
-            with s_col1:
-                c_s1 = st.number_input("1성 판매가", min_value=0, value=0)
-            with s_col2:
-                c_s2 = st.number_input("2성 판매가", min_value=0, value=0)
-            with s_col3:
-                c_s3 = st.number_input("3성 판매가", min_value=0, value=0)
-            with s_col4:
-                c_s4 = st.number_input("4성 판매가", min_value=0, value=0)
-            with s_col5:
-                c_s5 = st.number_input("5성 판매가", min_value=0, value=0)
+        if add_mode == "새로운 커스텀 요리 레시피":
+            with st.form("custom_recipe_form", clear_on_submit=True):
+                col_c1, col_c2 = st.columns([1, 2])
+                with col_c1:
+                    c_name = st.text_input("요리 이름", placeholder="예: 벚꽃 롤케이크")
+                with col_c2:
+                    c_recipe = st.text_input(
+                        "필요 식재료 (쉼표로 구분)",
+                        placeholder="예: 2 Strawberry, 1 Milk, 1 Wheat",
+                    )
+                st.write("💰 성급별 판매가 입력 (해당 없는 성급은 0으로 두세요)")
+                s_col1, s_col2, s_col3, s_col4, s_col5 = st.columns(5)
+                with s_col1:
+                    c_s1 = st.number_input("1성 판매가", min_value=0, value=0)
+                with s_col2:
+                    c_s2 = st.number_input("2성 판매가", min_value=0, value=0)
+                with s_col3:
+                    c_s3 = st.number_input("3성 판매가", min_value=0, value=0)
+                with s_col4:
+                    c_s4 = st.number_input("4성 판매가", min_value=0, value=0)
+                with s_col5:
+                    c_s5 = st.number_input("5성 판매가", min_value=0, value=0)
+                c_submit = st.form_submit_button("레시피 DB에 저장하기", type="primary")
 
-            c_submit = st.form_submit_button("레시피 DB에 저장하기", type="primary")
+            if c_submit:
+                if not c_name or not c_recipe:
+                    st.error("요리 이름과 필요 식재료를 모두 입력해 주세요!")
+                else:
+                    conn = get_connection()
+                    c = conn.cursor()
+                    c.execute(
+                        "INSERT INTO custom_recipes (recipe_name, ingredients, s1_price, s2_price, s3_price, s4_price, s5_price, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (c_name, c_recipe, c_s1, c_s2, c_s3, c_s4, c_s5, get_kst_now()),
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success(
+                        f"[{c_name}] 레시피가 성공적으로 저장되었습니다! '커스텀 요리 효율표' 탭을 확인해 주세요."
+                    )
 
-        if c_submit:
-            if not c_name or not c_recipe:
-                st.error("요리 이름과 필요 식재료를 모두 입력해 주세요!")
-            else:
-                conn = get_connection()
-                c = conn.cursor()
-                c.execute(
-                    """INSERT INTO custom_recipes (recipe_name, ingredients, s1_price, s2_price, s3_price, s4_price, s5_price, timestamp) 
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (c_name, c_recipe, c_s1, c_s2, c_s3, c_s4, c_s5, get_kst_now()),
+        elif add_mode == "새로운 커스텀 재료 (상점 등)":
+            with st.form("custom_ingredient_form", clear_on_submit=True):
+                i_name = st.text_input(
+                    "재료 이름 (영문 권장)", placeholder="예: Romaine Lettuce"
                 )
-                conn.commit()
-                conn.close()
-                st.success(
-                    f"[{c_name}] 레시피가 성공적으로 저장되었습니다! '커스텀 요리 효율표' 탭을 확인해 주세요."
+                i_price = st.number_input("재료 단가 (G)", min_value=0, value=0)
+                i_submit = st.form_submit_button("재료 저장하기", type="primary")
+
+            if i_submit:
+                if not i_name:
+                    st.error("재료 이름을 입력해 주세요!")
+                else:
+                    conn = get_connection()
+                    c = conn.cursor()
+                    c.execute(
+                        "INSERT INTO custom_ingredients (name, price, timestamp) VALUES (?, ?, ?)",
+                        (i_name, i_price, get_kst_now()),
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success(
+                        f"[{i_name}] 재료가 저장되었습니다! 새로고침 시 효율표에 반영됩니다."
+                    )
+
+        elif add_mode == "새로운 커스텀 작물":
+            with st.form("custom_crop_form", clear_on_submit=True):
+                cr_name = st.text_input(
+                    "작물 이름 (영문 권장)", placeholder="예: Springday Strawberry"
                 )
+                cr_time = st.number_input("성장 시간 (분)", min_value=1, value=15)
+                st.write("💰 성급별 상점 판매가 입력")
+                cr_col1, cr_col2, cr_col3, cr_col4, cr_col5 = st.columns(5)
+                with cr_col1:
+                    cr_s1 = st.number_input("1성 가격", min_value=0, value=0)
+                with cr_col2:
+                    cr_s2 = st.number_input("2성 가격", min_value=0, value=0)
+                with cr_col3:
+                    cr_s3 = st.number_input("3성 가격", min_value=0, value=0)
+                with cr_col4:
+                    cr_s4 = st.number_input("4성 가격", min_value=0, value=0)
+                with cr_col5:
+                    cr_s5 = st.number_input("5성 가격", min_value=0, value=0)
+                cr_submit = st.form_submit_button("작물 저장하기", type="primary")
+
+            if cr_submit:
+                if not cr_name:
+                    st.error("작물 이름을 입력해 주세요!")
+                else:
+                    conn = get_connection()
+                    c = conn.cursor()
+                    c.execute(
+                        "INSERT INTO custom_crops (name, growth_time_mins, s1_price, s2_price, s3_price, s4_price, s5_price, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            cr_name,
+                            cr_time,
+                            cr_s1,
+                            cr_s2,
+                            cr_s3,
+                            cr_s4,
+                            cr_s5,
+                            get_kst_now(),
+                        ),
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success(
+                        f"[{cr_name}] 작물이 저장되었습니다! (수확률은 토마토 데이터를 참고하여 계산됩니다.)"
+                    )
 
     with tab_view:
         st.subheader("📝 저장된 커스텀 요리 효율표")
-        conn = get_connection()
-        df_custom = pd.read_sql_query(
-            "SELECT * FROM custom_recipes ORDER BY id DESC", conn
-        )
-        conn.close()
-
         if df_custom.empty:
             st.info(
                 "저장된 커스텀 레시피가 없습니다. 옆의 탭에서 레시피를 추가해 주세요."
@@ -2057,176 +2181,72 @@ def render_efficiency():
         else:
             results = []
             for _, row in df_custom.iterrows():
-                db_c_name = row["recipe_name"]
-                db_c_recipe = row["ingredients"]
-                custom_prices = {
-                    "s1": row["s1_price"],
-                    "s2": row["s2_price"],
-                    "s3": row["s3_price"],
-                    "s4": row["s4_price"],
-                    "s5": row["s5_price"],
-                }
-
-                reqs = {}
-                for item in db_c_recipe.split(","):
-                    item = item.strip()
-                    if not item:
-                        continue
-                    parts = item.split(" ", 1)
-                    if len(parts) == 2 and parts[0].isdigit():
-                        name = parts[1]
-                        if name == "CookingOil":
-                            name = "Cooking Oil"
-                        reqs[name] = int(parts[0])
-
-                has_crop_or_seafood = any(
-                    ing in growth_mins or ing in generic_seafood_prices for ing in reqs
-                )
-                tiers_to_generate = (
-                    ["1성", "2성", "3성", "4성"] if has_crop_or_seafood else ["기본"]
-                )
-
-                for t_idx in tiers_to_generate:
-                    display_name = (
-                        db_c_name if t_idx == "기본" else f"{db_c_name}_{t_idx[0]}"
+                results.extend(
+                    calculate_recipe_row(
+                        row["recipe_name"],
+                        row["ingredients"],
+                        recipe_prices[row["recipe_name"]],
                     )
-                    prob_tier = "1/2성" if t_idx in ["기본", "1성", "2성"] else t_idx
+                )
 
-                    total_material_cost = 0
-                    total_forage_mins = 0
-                    total_field_mins = 0
-                    can_calc_field = True
-
-                    for ing_name, qty in reqs.items():
-                        target_tier_for_price = "1성" if t_idx == "기본" else t_idx
-                        actual_store_name = store_alias.get(ing_name, ing_name)
-                        mapped_recipe_name = sub_recipe_map.get(ing_name, ing_name)
-
-                        if actual_store_name in item_costs:
-                            total_material_cost += qty * item_costs[actual_store_name]
-                        elif ing_name in crop_sell_prices:
-                            total_material_cost += qty * crop_sell_prices[ing_name].get(
-                                target_tier_for_price, 0
-                            )
-                        elif ing_name in generic_seafood_prices:
-                            total_material_cost += qty * generic_seafood_prices[
-                                ing_name
-                            ].get(target_tier_for_price, 0)
-                        elif ing_name in forage_sell_prices:
-                            total_material_cost += qty * forage_sell_prices[ing_name]
-                        elif mapped_recipe_name in recipe_prices:
-                            price = recipe_prices[mapped_recipe_name].get(
-                                target_tier_for_price
-                            )
-                            if price is None:
-                                price = recipe_prices[mapped_recipe_name].get("1성", 0)
-                            total_material_cost += qty * price
-
-                        if ing_name in forage_speeds:
-                            if forage_speeds[ing_name] > 0:
-                                total_forage_mins += qty / forage_speeds[ing_name]
-                            else:
-                                total_forage_mins = float("inf")
-
-                        if ing_name in growth_mins:
-                            if ing_name in yield_rates:
-                                rate = yield_rates[ing_name].get(
-                                    target_tier_for_price, 0
-                                )
-                                if rate > 0:
-                                    harvests = qty / (rate * 40)
-                                    total_field_mins += harvests * growth_mins[ing_name]
-                                else:
-                                    can_calc_field = False
-                            else:
-                                can_calc_field = False
-
-                    if prob_tier in cook_probs:
-                        probs = cook_probs[prob_tier]
-                        expected_revenue = sum(
-                            [
-                                probs[s] * custom_prices[s]
-                                for s in ["s1", "s2", "s3", "s4", "s5"]
-                                if custom_prices[s] > 0
-                            ]
+            if results:
+                df_custom_results = pd.DataFrame(results).drop(columns=["_ing_keys"])
+                st.dataframe(
+                    apply_profit_style(
+                        df_custom_results.style.format(
+                            {
+                                "재료 원가": format_currency,
+                                "평균 판매가": format_currency,
+                                "순이익": format_currency,
+                            }
                         )
-                        net_profit = expected_revenue - total_material_cost
-                    else:
-                        expected_revenue = None
-                        net_profit = None
-
-                    field_time_str = (
-                        format_real_time(total_field_mins)
-                        if can_calc_field and any(ing in growth_mins for ing in reqs)
-                        else (
-                            "해당 없음"
-                            if not any(ing in growth_mins for ing in reqs)
-                            else "데이터 부족"
-                        )
-                    )
-                    forage_time_str = (
-                        format_real_time(total_forage_mins)
-                        if total_forage_mins > 0
-                        else "해당 없음"
-                    )
-
-                    results.append(
-                        {
-                            "요리 이름": display_name,
-                            "필요 식재료": db_c_recipe,
-                            "재료 원가": total_material_cost,
-                            "평균 판매가": expected_revenue,
-                            "순이익": net_profit,
-                            "채집 시간": forage_time_str,
-                            "밭 점유": field_time_str,
-                        }
-                    )
-
-            st.dataframe(
-                pd.DataFrame(results)
-                .style.format(
-                    {
-                        "재료 원가": format_currency,
-                        "평균 판매가": format_currency,
-                        "순이익": format_currency,
-                    }
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
                 )
-                .background_gradient(subset=["순이익"], cmap="Greens"),
-                use_container_width=True,
-                hide_index=True,
-            )
 
+    # 💥 복구된 부분: 3단 분리된 커스텀 데이터 관리 UI 💥
     with tab_manage:
-        st.subheader("🗑️ 저장된 커스텀 요리 데이터 관리")
-        conn = get_connection()
-        df_custom_all = pd.read_sql_query(
-            "SELECT * FROM custom_recipes ORDER BY id DESC", conn
-        )
-        conn.close()
+        st.subheader("🗑️ 커스텀 데이터 관리")
 
-        if df_custom_all.empty:
-            st.write("삭제할 커스텀 레시피 데이터가 없습니다.")
-        else:
-            st.dataframe(df_custom_all, use_container_width=True)
-            delete_custom_id = st.number_input(
-                "삭제할 커스텀 레시피의 ID를 입력하세요",
-                min_value=0,
-                step=1,
-                key="del_custom",
-            )
-            if st.button("해당 ID 커스텀 레시피 삭제", type="primary"):
-                conn = get_connection()
-                c = conn.cursor()
-                c.execute(
-                    "DELETE FROM custom_recipes WHERE id = ?", (delete_custom_id,)
-                )
-                conn.commit()
-                conn.close()
-                st.success(
-                    f"ID {delete_custom_id} 데이터가 삭제되었습니다. 새로고침을 해주세요."
-                )
-                st.rerun()
+        def delete_custom_row(table, row_id):
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,))
+            conn.commit()
+            conn.close()
+            st.success(f"ID {row_id} 삭제 완료! (적용을 위해 화면을 새로고침해주세요)")
 
+        col_m1, col_m2, col_m3 = st.columns(3)
+        with col_m1:
+            st.markdown("**📝 커스텀 요리**")
+            if not df_custom.empty:
+                st.dataframe(df_custom, use_container_width=True)
+                r_id = st.number_input("삭제할 요리 ID", min_value=0, key="d_recipe")
+                if st.button("요리 삭제", key="btn_d_recipe"):
+                    delete_custom_row("custom_recipes", r_id)
+            else:
+                st.info("데이터 없음")
+
+        with col_m2:
+            st.markdown("**🛒 커스텀 재료**")
+            if not df_custom_ings.empty:
+                st.dataframe(df_custom_ings, use_container_width=True)
+                i_id = st.number_input("삭제할 재료 ID", min_value=0, key="d_ing")
+                if st.button("재료 삭제", key="btn_d_ing"):
+                    delete_custom_row("custom_ingredients", i_id)
+            else:
+                st.info("데이터 없음")
+
+        with col_m3:
+            st.markdown("**🌱 커스텀 작물**")
+            if not df_custom_crops.empty:
+                st.dataframe(df_custom_crops, use_container_width=True)
+                c_id = st.number_input("삭제할 작물 ID", min_value=0, key="d_crop")
+                if st.button("작물 삭제", key="btn_d_crop"):
+                    delete_custom_row("custom_crops", c_id)
+            else:
+                st.info("데이터 없음")
 
 if app_mode == "🌱 원예 (작물) 실험":
     render_gardening()
