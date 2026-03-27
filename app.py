@@ -54,7 +54,7 @@ with st.sidebar:
             st.rerun()
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=60, show_spinner=False)
 def load_query_data(query, params=None):
     conn = get_connection()
     if params:
@@ -63,6 +63,45 @@ def load_query_data(query, params=None):
         df = pd.read_sql_query(query, conn)
     conn.close()
     return df
+
+
+@st.cache_data(ttl=60, show_spinner="데이터를 한 번에 불러오고 있습니다...")
+def load_bulk_efficiency_data():
+    conn = get_connection()
+    df_store = pd.read_sql_query(
+        """
+        SELECT 
+            r.ingredient_name, r.discounted_price, r.base_price,
+            COUNT(d.id) as total_days,
+            SUM(CASE WHEN d.is_discounted THEN 1 ELSE 0 END) as discount_days
+        FROM store_reference r
+        LEFT JOIN store_discounts d ON r.ingredient_name = d.ingredient_name
+        GROUP BY r.ingredient_name
+    """,
+        conn,
+    )
+    df_crop = pd.read_sql_query("SELECT * FROM crop_reference", conn)
+    df_cook_exp = pd.read_sql_query("SELECT * FROM cooking_experiments", conn)
+    df_forage = pd.read_sql_query("SELECT * FROM foraging_experiments", conn)
+    df_rasp = pd.read_sql_query("SELECT * FROM raspberry_experiments", conn)
+    df_mush = pd.read_sql_query("SELECT * FROM mushroom_experiments", conn)
+    df_yield = pd.read_sql_query("SELECT * FROM experiments", conn)
+    df_custom = pd.read_sql_query("SELECT * FROM custom_recipes ORDER BY id DESC", conn)
+    df_custom_ings = pd.read_sql_query("SELECT * FROM custom_ingredients", conn)
+    df_custom_crops = pd.read_sql_query("SELECT * FROM custom_crops", conn)
+    conn.close()
+    return (
+        df_store,
+        df_crop,
+        df_cook_exp,
+        df_forage,
+        df_rasp,
+        df_mush,
+        df_yield,
+        df_custom,
+        df_custom_ings,
+        df_custom_crops,
+    )
 
 
 @st.cache_data(ttl=60)
@@ -1717,26 +1756,22 @@ def render_efficiency():
 
     df_recipes = pd.DataFrame(recipe_raw_data)
 
-    df_store = load_query_data(
-        """
-        SELECT 
-            r.ingredient_name, r.discounted_price, r.base_price,
-            COUNT(d.id) as total_days,
-            SUM(CASE WHEN d.is_discounted THEN 1 ELSE 0 END) as discount_days
-        FROM store_reference r
-        LEFT JOIN store_discounts d ON r.ingredient_name = d.ingredient_name
-        GROUP BY r.ingredient_name
-    """
-    )
-    df_crop = load_query_data("SELECT * FROM crop_reference")
-    df_cook_exp = load_query_data("SELECT * FROM cooking_experiments")
-    df_forage = load_query_data("SELECT * FROM foraging_experiments")
-    df_rasp = load_query_data("SELECT * FROM raspberry_experiments")
-    df_mush = load_query_data("SELECT * FROM mushroom_experiments")
-    df_yield = load_query_data("SELECT * FROM experiments")
-    df_custom = load_query_data("SELECT * FROM custom_recipes ORDER BY id DESC")
-    df_custom_ings = load_query_data("SELECT * FROM custom_ingredients")
-    df_custom_crops = load_query_data("SELECT * FROM custom_crops")
+    with st.spinner("📊 데이터를 불러오고 효율을 계산 중입니다... (최초 1회 1~2초)"):
+        df_recipes = pd.DataFrame(recipe_raw_data)
+
+        # 단 1번의 연결로 10개 데이터를 한방에 가져옵니다. (로딩 지연 대폭 감소)
+        (
+            df_store,
+            df_crop,
+            df_cook_exp,
+            df_forage,
+            df_rasp,
+            df_mush,
+            df_yield,
+            df_custom,
+            df_custom_ings,
+            df_custom_crops,
+        ) = load_bulk_efficiency_data()
 
     all_recipes_dict = {}
     recipe_prices = {}
@@ -1840,9 +1875,7 @@ def render_efficiency():
         }
         local_growth_mins[row["name"]] = row["growth_time_mins"]
 
-    col_t1, col_t2 = st.columns([1, 2])
-    with col_t1:
-        use_rainbow = st.toggle("🌈 채집 무지개 버프 데이터 적용", value=False)
+    use_rainbow = st.toggle("🌈 채집 무지개 버프 데이터 적용", value=False)
     buff_val = 1 if use_rainbow else 0
 
     forage_speeds = {}
