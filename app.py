@@ -452,7 +452,7 @@ def render_gardening():
                     """
                     INSERT INTO experiments 
                     (fertilizer, crop_type, water_stars, weed_bitmap, weed_removed, weed_removed_after, unattended_time, planted_count, star_1, star_2, star_3, star_4, star_5, timestamp) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                     (
                         fertilizer,
@@ -651,7 +651,7 @@ def render_gardening():
             if st.button("해당 ID 원예 데이터 삭제", type="primary"):
                 conn = get_connection()
                 c = conn.cursor()
-                c.execute("DELETE FROM experiments WHERE id = ?", (delete_id,))
+                c.execute("DELETE FROM experiments WHERE id = %s", (delete_id,))
                 conn.commit()
                 conn.close()
                 st.success(
@@ -717,7 +717,7 @@ def render_cooking():
                     conn = get_connection()
                     c = conn.cursor()
                     c.execute(
-                        "INSERT INTO cooking_experiments (recipe_name, cook_count, star_1, star_2, star_3, star_4, star_5, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO cooking_experiments (recipe_name, cook_count, star_1, star_2, star_3, star_4, star_5, timestamp) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                         (
                             final_recipe_name,
                             cook_count,
@@ -752,13 +752,12 @@ def render_cooking():
                     "1/2성 재료 (접미사 없음)",
                     "3성 재료 (_3)",
                     "4성 재료 (_4)",
-                    "5성 재료 (_5)",
                 ],
             )
             filtered_cook = df_cook.copy()
             if f_ingredient_tier == "1/2성 재료 (접미사 없음)":
                 filtered_cook = filtered_cook[
-                    ~filtered_cook["recipe_name"].str.endswith(("_3", "_4", "_5"))
+                    ~filtered_cook["recipe_name"].str.endswith(("_3", "_4"))
                 ]
             elif f_ingredient_tier == "3성 재료 (_3)":
                 filtered_cook = filtered_cook[
@@ -767,10 +766,6 @@ def render_cooking():
             elif f_ingredient_tier == "4성 재료 (_4)":
                 filtered_cook = filtered_cook[
                     filtered_cook["recipe_name"].str.endswith("_4")
-                ]
-            elif f_ingredient_tier == "5성 재료 (_5)":
-                filtered_cook = filtered_cook[
-                    filtered_cook["recipe_name"].str.endswith("_5")
                 ]
 
             f_recipe = st.sidebar.selectbox(
@@ -872,7 +867,7 @@ def render_cooking():
                 conn = get_connection()
                 c = conn.cursor()
                 c.execute(
-                    "DELETE FROM cooking_experiments WHERE id = ?", (delete_c_id,)
+                    "DELETE FROM cooking_experiments WHERE id = %s", (delete_c_id,)
                 )
                 conn.commit()
                 conn.close()
@@ -899,7 +894,7 @@ def render_apple():
         conn = get_connection()
         c = conn.cursor()
         c.execute(
-            "INSERT INTO foraging_experiments (rainbow_buff, duration_minutes, apples_count, blueberries_count, timestamp) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO foraging_experiments (rainbow_buff, duration_minutes, apples_count, blueberries_count, timestamp) VALUES (%s, %s, %s, %s, %s)",
             (
                 st.session_state["f_rainbow"],
                 duration,
@@ -1030,7 +1025,7 @@ def render_apple():
                 conn = get_connection()
                 c = conn.cursor()
                 c.execute(
-                    "DELETE FROM foraging_experiments WHERE id = ?", (delete_f_id,)
+                    "DELETE FROM foraging_experiments WHERE id = %s", (delete_f_id,)
                 )
                 conn.commit()
                 conn.close()
@@ -1051,7 +1046,7 @@ def render_raspberry():
         conn = get_connection()
         c = conn.cursor()
         c.execute(
-            "INSERT INTO raspberry_experiments (rainbow_buff, duration_minutes, gathered_count, timestamp) VALUES (?, ?, ?, ?)",
+            "INSERT INTO raspberry_experiments (rainbow_buff, duration_minutes, gathered_count, timestamp) VALUES (%s, %s, %s, %s)",
             (
                 st.session_state["r_rainbow"],
                 duration,
@@ -1134,7 +1129,9 @@ def render_raspberry():
             if st.button("해당 ID 채집 데이터 삭제"):
                 conn = get_connection()
                 c = conn.cursor()
-                c.execute("DELETE FROM raspberry_experiments WHERE id = ?", (del_r_id,))
+                c.execute(
+                    "DELETE FROM raspberry_experiments WHERE id = %s", (del_r_id,)
+                )
                 conn.commit()
                 conn.close()
                 st.rerun()
@@ -1185,7 +1182,7 @@ def render_mushroom():
                         conn = get_connection()
                         c = conn.cursor()
                         c.execute(
-                            "INSERT INTO mushroom_experiments (mushroom_type, rainbow_buff, duration_minutes, gathered_count, timestamp) VALUES (?, ?, ?, ?, ?)",
+                            "INSERT INTO mushroom_experiments (mushroom_type, rainbow_buff, duration_minutes, gathered_count, timestamp) VALUES (%s, %s, %s, %s, %s)",
                             (m_eng, buff, duration, count, get_kst_now()),
                         )
                         conn.commit()
@@ -1194,7 +1191,7 @@ def render_mushroom():
 
             conn = get_connection()
             df_m = pd.read_sql_query(
-                "SELECT * FROM mushroom_experiments WHERE mushroom_type = ?",
+                "SELECT * FROM mushroom_experiments WHERE mushroom_type = %s",
                 conn,
                 params=(m_eng,),
             )
@@ -1229,7 +1226,7 @@ def render_mushroom():
                         conn = get_connection()
                         c = conn.cursor()
                         c.execute(
-                            "DELETE FROM mushroom_experiments WHERE id = ?", (del_id,)
+                            "DELETE FROM mushroom_experiments WHERE id = %s", (del_id,)
                         )
                         conn.commit()
                         conn.close()
@@ -1395,7 +1392,7 @@ def render_fishing():
                     conn = get_connection()
                     c = conn.cursor()
                     c.execute(
-                        "INSERT INTO fishing_experiments (location, weather, time_period, rainbow_buff, duration_minutes, catches_json, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO fishing_experiments (location, weather, time_period, rainbow_buff, duration_minutes, catches_json, timestamp) VALUES (%s, %s, %s, %s, %s, %s, %s)",
                         (
                             f_location,
                             f_weather,
@@ -1469,7 +1466,7 @@ def render_fishing():
             if st.button("데이터 삭제"):
                 conn = get_connection()
                 c = conn.cursor()
-                c.execute("DELETE FROM fishing_experiments WHERE id = ?", (del_id,))
+                c.execute("DELETE FROM fishing_experiments WHERE id = %s", (del_id,))
                 conn.commit()
                 conn.close()
                 st.rerun()
@@ -1499,7 +1496,7 @@ def render_shop():
             c = conn.cursor()
             for ing in filtered_ingredients:
                 c.execute(
-                    "INSERT INTO store_discounts (record_date, ingredient_name, is_discounted, timestamp) VALUES (?, ?, ?, ?) ON CONFLICT(record_date, ingredient_name) DO UPDATE SET is_discounted = excluded.is_discounted, timestamp = excluded.timestamp",
+                    "INSERT INTO store_discounts (record_date, ingredient_name, is_discounted, timestamp) VALUES (%s, %s, %s, %s) ON CONFLICT(record_date, ingredient_name) DO UPDATE SET is_discounted = excluded.is_discounted, timestamp = excluded.timestamp",
                     (str(record_date), ing, ing in discounted_items, get_kst_now()),
                 )
             conn.commit()
@@ -1553,7 +1550,7 @@ def render_shop():
             if st.button("데이터 삭제"):
                 conn = get_connection()
                 c = conn.cursor()
-                c.execute("DELETE FROM store_discounts WHERE id = ?", (delete_s_id,))
+                c.execute("DELETE FROM store_discounts WHERE id = %s", (delete_s_id,))
                 conn.commit()
                 conn.close()
                 st.rerun()
@@ -2009,13 +2006,23 @@ def render_efficiency():
 
     with tab_main:
         st.subheader("📊 요리 종합 기회비용 및 효율 분석표")
+
+        # 커스텀 재료 이름 목록 추출
+        custom_ing_names = (
+            df_custom_ings["name"].tolist() if not df_custom_ings.empty else []
+        )
+
+        # Sugar 및 커스텀 재료 제외하고 순수 상점 재료만 필터 옵션으로 구성
         store_filter_options = [
-            item for item in item_costs.keys() if "Sugar" not in item
+            item
+            for item in item_costs.keys()
+            if "Sugar" not in item and item not in custom_ing_names
         ]
+
         selected_filter_ings = st.multiselect(
             "🛒 상점 재료 필터 (마시모 상점 판매 물품 한정)",
             options=sorted(store_filter_options),
-            placeholder="필터링할 상점/커스텀 재료를 선택하세요",
+            placeholder="필터링할 마시모 상점 재료를 선택하세요",
         )
 
         if selected_filter_ings:
@@ -2094,7 +2101,7 @@ def render_efficiency():
                     conn = get_connection()
                     c = conn.cursor()
                     c.execute(
-                        "INSERT INTO custom_recipes (recipe_name, ingredients, s1_price, s2_price, s3_price, s4_price, s5_price, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO custom_recipes (recipe_name, ingredients, s1_price, s2_price, s3_price, s4_price, s5_price, timestamp) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                         (c_name, c_recipe, c_s1, c_s2, c_s3, c_s4, c_s5, get_kst_now()),
                     )
                     conn.commit()
@@ -2118,7 +2125,7 @@ def render_efficiency():
                     conn = get_connection()
                     c = conn.cursor()
                     c.execute(
-                        "INSERT INTO custom_ingredients (name, price, timestamp) VALUES (?, ?, ?)",
+                        "INSERT INTO custom_ingredients (name, price, timestamp) VALUES (%s, %s, %s)",
                         (i_name, i_price, get_kst_now()),
                     )
                     conn.commit()
@@ -2154,7 +2161,7 @@ def render_efficiency():
                     conn = get_connection()
                     c = conn.cursor()
                     c.execute(
-                        "INSERT INTO custom_crops (name, growth_time_mins, s1_price, s2_price, s3_price, s4_price, s5_price, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO custom_crops (name, growth_time_mins, s1_price, s2_price, s3_price, s4_price, s5_price, timestamp) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                         (
                             cr_name,
                             cr_time,
@@ -2212,7 +2219,7 @@ def render_efficiency():
         def delete_custom_row(table, row_id):
             conn = get_connection()
             c = conn.cursor()
-            c.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,))
+            c.execute(f"DELETE FROM {table} WHERE id = %s", (row_id,))
             conn.commit()
             conn.close()
             st.success(f"ID {row_id} 삭제 완료! (적용을 위해 화면을 새로고침해주세요)")

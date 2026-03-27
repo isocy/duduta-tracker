@@ -1,1 +1,6 @@
-__pycache__
+.streamlit/
+*.db
+.venv/
+__pycache__/
+
+run_script.py

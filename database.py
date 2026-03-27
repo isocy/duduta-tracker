@@ -1,12 +1,10 @@
-import sqlite3
+import psycopg2
 import streamlit as st
-
 from static_data import fish_data, crops_data, store_data
 
-DB_NAME = "duduta_experiment.db"
-
 def get_connection():
-    return sqlite3.connect(DB_NAME, check_same_thread=False)
+    # secrets.toml 또는 Streamlit Cloud 설정에서 주소를 가져옵니다.
+    return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 @st.cache_resource
 def init_db():
@@ -16,12 +14,13 @@ def init_db():
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS experiments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             fertilizer BOOLEAN,
             crop_type TEXT,
             water_stars INTEGER,
             weed_bitmap TEXT,
             weed_removed BOOLEAN,
+            weed_removed_after BOOLEAN DEFAULT FALSE,
             unattended_time INTEGER,
             planted_count INTEGER,
             star_1 INTEGER,
@@ -29,30 +28,15 @@ def init_db():
             star_3 INTEGER,
             star_4 INTEGER,
             star_5 INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
     )
 
-    c.execute("PRAGMA table_info(experiments)")
-    columns = [info[1] for info in c.fetchall()]
-    if "weed_removed_after" not in columns:
-        c.execute(
-            "ALTER TABLE experiments ADD COLUMN weed_removed_after BOOLEAN DEFAULT 0"
-        )
-
-    c.execute("PRAGMA table_info(experiments)")
-    columns = [info[1] for info in c.fetchall()]
-    if "weed_location_map" in columns:
-        try:
-            c.execute("ALTER TABLE experiments DROP COLUMN weed_location_map")
-        except sqlite3.OperationalError:
-            pass
-
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS cooking_experiments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             recipe_name TEXT,
             cook_count INTEGER,
             star_1 INTEGER,
@@ -60,7 +44,7 @@ def init_db():
             star_3 INTEGER,
             star_4 INTEGER,
             star_5 INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
     )
@@ -68,12 +52,12 @@ def init_db():
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS foraging_experiments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             rainbow_buff BOOLEAN,
             duration_minutes FLOAT,
             apples_count INTEGER,
             blueberries_count INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
     )
@@ -81,12 +65,12 @@ def init_db():
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS mushroom_experiments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             mushroom_type TEXT,
             rainbow_buff BOOLEAN,
             duration_minutes FLOAT,
             gathered_count INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
     )
@@ -94,11 +78,11 @@ def init_db():
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS raspberry_experiments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             rainbow_buff BOOLEAN,
             duration_minutes FLOAT,
             gathered_count INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
     )
@@ -106,22 +90,21 @@ def init_db():
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS fishing_experiments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             location TEXT,
             weather TEXT,
             time_period TEXT,
             rainbow_buff BOOLEAN,
             duration_minutes FLOAT,
             catches_json TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
     )
 
-    c.execute("DROP TABLE IF EXISTS fish_reference")
     c.execute(
         """
-        CREATE TABLE fish_reference (
+        CREATE TABLE IF NOT EXISTS fish_reference (
             fish_name TEXT PRIMARY KEY,
             location_category TEXT,
             weather_req TEXT,
@@ -138,17 +121,26 @@ def init_db():
 
     c.executemany(
         """
-        INSERT OR REPLACE INTO fish_reference 
+        INSERT INTO fish_reference 
         (fish_name, location_category, weather_req, time_req, shadow_size, star_1, star_2, star_3, star_4, star_5)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (fish_name) DO UPDATE SET
+            location_category = EXCLUDED.location_category,
+            weather_req = EXCLUDED.weather_req,
+            time_req = EXCLUDED.time_req,
+            shadow_size = EXCLUDED.shadow_size,
+            star_1 = EXCLUDED.star_1,
+            star_2 = EXCLUDED.star_2,
+            star_3 = EXCLUDED.star_3,
+            star_4 = EXCLUDED.star_4,
+            star_5 = EXCLUDED.star_5
     """,
         fish_data,
     )
 
-    c.execute("DROP TABLE IF EXISTS crop_reference")
     c.execute(
         """
-        CREATE TABLE crop_reference (
+        CREATE TABLE IF NOT EXISTS crop_reference (
             crop_name TEXT PRIMARY KEY,
             growth_time TEXT,
             seed_cost INTEGER,
@@ -163,17 +155,24 @@ def init_db():
 
     c.executemany(
         """
-        INSERT OR REPLACE INTO crop_reference 
+        INSERT INTO crop_reference 
         (crop_name, growth_time, seed_cost, star_1_price, star_2_price, star_3_price, star_4_price, star_5_price)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (crop_name) DO UPDATE SET
+            growth_time = EXCLUDED.growth_time,
+            seed_cost = EXCLUDED.seed_cost,
+            star_1_price = EXCLUDED.star_1_price,
+            star_2_price = EXCLUDED.star_2_price,
+            star_3_price = EXCLUDED.star_3_price,
+            star_4_price = EXCLUDED.star_4_price,
+            star_5_price = EXCLUDED.star_5_price
     """,
         crops_data,
     )
 
-    c.execute("DROP TABLE IF EXISTS store_reference")
     c.execute(
         """
-        CREATE TABLE store_reference (
+        CREATE TABLE IF NOT EXISTS store_reference (
             ingredient_name TEXT PRIMARY KEY,
             discounted_price INTEGER,
             base_price INTEGER
@@ -183,9 +182,12 @@ def init_db():
 
     c.executemany(
         """
-        INSERT OR REPLACE INTO store_reference 
+        INSERT INTO store_reference 
         (ingredient_name, discounted_price, base_price)
-        VALUES (?, ?, ?)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (ingredient_name) DO UPDATE SET
+            discounted_price = EXCLUDED.discounted_price,
+            base_price = EXCLUDED.base_price
     """,
         store_data,
     )
@@ -193,11 +195,11 @@ def init_db():
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS store_discounts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             record_date TEXT,
             ingredient_name TEXT,
             is_discounted BOOLEAN,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(record_date, ingredient_name)
         )
     """
@@ -206,7 +208,7 @@ def init_db():
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS custom_recipes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             recipe_name TEXT,
             ingredients TEXT,
             s1_price INTEGER,
@@ -214,19 +216,18 @@ def init_db():
             s3_price INTEGER,
             s4_price INTEGER,
             s5_price INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
     )
 
-    # 새로 추가된 커스텀 재료 / 작물 테이블
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS custom_ingredients (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT,
             price INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
     )
@@ -234,7 +235,7 @@ def init_db():
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS custom_crops (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT,
             growth_time_mins INTEGER,
             s1_price INTEGER,
@@ -242,7 +243,7 @@ def init_db():
             s3_price INTEGER,
             s4_price INTEGER,
             s5_price INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
     )
