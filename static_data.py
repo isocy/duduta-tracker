@@ -929,6 +929,15 @@ recipe_raw_data = [
         "recipe": "1 Cheese, 1 Milk, 1 Wheat",
     },
     {
+        "name": "Grass Cake",
+        "s1": 690,
+        "s2": 1035,
+        "s3": 1380,
+        "s4": 2760,
+        "s5": 5520,
+        "recipe": "1 Wheat, 1 Milk, 1 Matcha Powder, 1 Weed",
+    },
+    {
         "name": "Tiramisu",
         "s1": 530,
         "s2": 795,

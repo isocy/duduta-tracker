@@ -791,6 +791,11 @@ def render_cooking():
 
     with tab_analysis:
         st.header("요리 실험 결과 분석")
+
+        st.info(
+            "💡 **안내:** 현재 기록된 요리 실험 분석 결과는 **무지개 버프가 적용된 상태**를 가정하고 있습니다."
+        )
+
         df_cook = load_query_data("SELECT * FROM cooking_experiments")
 
         if df_cook.empty:
